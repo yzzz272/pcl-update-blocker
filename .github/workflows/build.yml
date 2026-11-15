@@ -1,0 +1,56 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 编译（csc + .NET Framework 4.x）
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: 夹具测试（PowerShell 7，跳过 GUI 冒烟）
+        shell: pwsh
+        run: ./tests/run-tests.ps1 -SkipGuiSmoke
+
+      - name: 夹具测试（Windows PowerShell 5.1 兼容性）
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass `
+            -File ./tests/run-tests.ps1 -SkipGuiSmoke
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows PowerShell 5.1 下测试失败：$LASTEXITCODE"
+          }
+
+      - name: 检查产物版本信息
+        shell: pwsh
+        run: |
+          $path = 'dist/PCL-Update-Blocker.exe'
+          if (-not (Test-Path -LiteralPath $path)) {
+            throw "缺少构建产物：$path"
+          }
+          $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($path)
+          Write-Host "FileVersion=$($info.FileVersion)"
+          Write-Host "ProductName=$($info.ProductName)"
+          if ($info.FileVersion -notlike '1.0.0.*') {
+            throw "版本号不是 1.0.0：$($info.FileVersion)"
+          }
+
+      - name: 上传 exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: PCL-Update-Blocker
+          path: dist/PCL-Update-Blocker.exe
+          if-no-files-found: error
